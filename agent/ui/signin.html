@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sign in to the hub · mem-sync</title>
+  <!-- Same saved theme as the main page, applied before first paint. -->
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <svg class="logomark" viewBox="0 0 40 32" aria-hidden="true" focusable="false">
+        <circle class="ring-a" cx="14" cy="16" r="9"></circle>
+        <circle class="ring-b" cx="26" cy="16" r="9"></circle>
+        <path class="ring-a" d="M20 9.3 A9 9 0 0 1 23 16"></path>
+      </svg>
+      <span class="logo-text">mem-sync</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="page-content">
+      <section class="setup signin" aria-labelledby="signin-title">
+        <h1 id="signin-title" class="setup-title">Sign in to your team's hub</h1>
+        <p id="signin-msg" class="setup-intro" role="status" aria-live="polite" tabindex="-1">Checking sign-in…</p>
+        <p id="signin-link" class="setup-intro" hidden>If no tab opened, <a id="signin-url" target="_blank" rel="noopener noreferrer">open this link</a>.</p>
+        <p id="signin-error" class="inline-error"></p>
+        <div id="signin-actions" class="actions" hidden>
+          <button id="signin-start" type="button" class="btn btn-primary" hidden>Sign in with Cloudflare</button>
+          <button id="signin-retry" type="button" class="btn btn-primary" hidden>Try again</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      var msg = document.getElementById("signin-msg");
+      var linkRow = document.getElementById("signin-link");
+      var link = document.getElementById("signin-url");
+      var err = document.getElementById("signin-error");
+      var actions = document.getElementById("signin-actions");
+      var startBtn = document.getElementById("signin-start");
+      var retry = document.getElementById("signin-retry");
+      // The agent turns this off when another site sent the browser here: then only a click starts sign-in.
+      var autostart = document.body.getAttribute("data-autostart") !== "0";
+      var run = 0; // bumped on every (re)start so an old poll loop stops
+
+      var OPENING = "Opening the Cloudflare sign-in in your browser…";
+      var WAITING = "Finish signing in on the Cloudflare tab. This page updates when you're done.";
+      var FAILED = "Sign-in didn't finish. Try again, or check the mem-sync log.";
+
+      // Shows a message; `button` is the one action to offer (or none), `error` the technical detail.
+      function show(text, opts) {
+        opts = opts || {};
+        msg.textContent = text;
+        err.textContent = opts.error || "";
+        startBtn.hidden = opts.button !== startBtn;
+        retry.hidden = opts.button !== retry;
+        actions.hidden = !opts.button;
+        var url = typeof opts.url === "string" && /^https:\/\//i.test(opts.url) ? opts.url : "";
+        linkRow.hidden = !url;
+        if (url) link.href = url;
+        if (opts.button) opts.button.focus();
+      }
+
+      function fail(detail) {
+        show(FAILED, { error: detail, button: retry });
+      }
+
+      function signedIn() {
+        show("Signed in. You can close this tab.");
+        document.title = "Signed in · mem-sync";
+      }
+
+      function apiKeyHub() {
+        show("This hub uses an API key. ");
+        var a = document.createElement("a");
+        a.href = "/";
+        a.textContent = "Open mem-sync settings";
+        msg.appendChild(a);
+      }
+
+      // ?hub=<id> signs in to that hub; without it the agent picks the hub that needs a sign-in.
+      var hub = new URLSearchParams(location.search).get("hub");
+      var path = hub ? "/local/hubs/" + encodeURIComponent(hub) + "/signin" : "/local/signin";
+
+      // Fetches the sign-in route; resolves { status, body } where body is null when the reply isn't JSON.
+      // A network failure rejects with a TypeError.
+      function call(method) {
+        var init = method === "POST" ? { method: "POST", headers: { "X-Mem-Sync": "1" } } : {};
+        return fetch(path, init).then(function (r) {
+          return r.text().then(function (text) {
+            var body = null;
+            try { body = JSON.parse(text); } catch (e) {}
+            return { status: r.status, body: body };
+          });
+        });
+      }
+
+      // Handles a reply. Returns true while sign-in is still running (keep polling).
+      function render(r, first) {
+        var s = r.body;
+        if (r.status === 409) {
+          if (s && s.reason === "not_needed") signedIn();
+          else apiKeyHub();
+          return false;
+        }
+        if (r.status < 200 || r.status >= 300 || !s || typeof s.state !== "string") {
+          fail(s && typeof s.error === "string" ? s.error : "mem-sync sent an unexpected reply (HTTP " + r.status + ").");
+          return false;
+        }
+        if (s.state === "done") { signedIn(); return false; }
+        if (s.state === "failed") { fail(s.error || "Sign-in failed."); return false; }
+        if (s.state !== "running") { fail("Sign-in stopped before it finished."); return false; }
+        show(first && !s.url ? OPENING : WAITING, { url: s.url });
+        return true;
+      }
+
+      function networkError(e) {
+        fail(e instanceof TypeError ? "Can't reach mem-sync on this computer. Make sure Claude Code is open." : String(e && e.message || e));
+      }
+
+      function poll(me) {
+        setTimeout(function () {
+          if (me !== run) return;
+          call("GET")
+            .then(function (r) { if (me === run && render(r, false)) poll(me); })
+            .catch(function (e) { if (me === run) networkError(e); });
+        }, 1000);
+      }
+
+      function start() {
+        var me = ++run;
+        show(OPENING);
+        msg.focus();
+        call("POST")
+          .then(function (r) { if (me === run && render(r, true)) poll(me); })
+          .catch(function (e) { if (me === run) networkError(e); });
+      }
+
+      // Look before starting: a running sign-in is joined, and a reload after signing in starts nothing
+      // (the agent answers "no sign-in needed").
+      function init() {
+        var me = ++run;
+        call("GET")
+          .then(function (r) {
+            if (me !== run) return;
+            if (r.status === 200 && r.body && r.body.state === "running") {
+              if (render(r, false)) poll(me);
+            } else if (r.status === 409 || r.status !== 200 || !r.body) {
+              render(r, false);
+            } else if (autostart) {
+              start();
+            } else {
+              show("Sign in to your team's hub to keep syncing.", { button: startBtn });
+            }
+          })
+          .catch(function (e) { if (me === run) networkError(e); });
+      }
+
+      startBtn.addEventListener("click", start);
+      retry.addEventListener("click", start);
+      init();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "mem-sync",
+  "version": "0.11.0",
+  "description": "Share claude-mem memory for mapped projects with your team through the mem-sync hub",
+  "author": { "name": "DevPlusOps" },
+  "dependencies": [
+    { "name": "claude-mem", "marketplace": "thedotmack" },
+    { "name": "mem-sync-ui", "marketplace": "devplusopsllc" }
+  ]
+}

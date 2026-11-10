@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>mem-sync</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/catchup.js" defer></script>
+  <script src="/hubs.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <svg class="logomark" viewBox="0 0 40 32" aria-hidden="true" focusable="false">
+        <circle class="ring-a" cx="14" cy="16" r="9"></circle>
+        <circle class="ring-b" cx="26" cy="16" r="9"></circle>
+        <path class="ring-a" d="M20 9.3 A9 9 0 0 1 23 16"></path>
+      </svg>
+      <span class="logo-text">mem-sync</span>
+    </div>
+
+    <div class="status">
+      <a id="admin-link" class="link-btn" target="_blank" rel="noopener noreferrer" hidden>Admin</a>
+      <span id="who" class="who" hidden></span>
+      <button id="conn-btn" type="button" class="icon-btn" aria-label="Hub connection" title="Hub connection" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z"></path>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path>
+        </svg>
+      </button>
+      <button id="theme-btn" type="button" class="icon-btn" aria-label="Theme">
+        <svg id="theme-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"></svg>
+      </button>
+    </div>
+  </header>
+
+  <p id="announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+
+  <main class="page">
+    <div class="page-content">
+      <p id="loading" class="loading" aria-live="polite">Loading…</p>
+
+      <!-- First run: the setup form lives here; when connected it moves into the connection dialog. -->
+      <section id="view-setup" class="view setup" aria-labelledby="setup-title" hidden>
+        <h1 id="setup-title" class="setup-title">Connect this machine to your team</h1>
+        <p class="setup-intro">mem-sync shares the Claude Code notes from folders you choose with your team's hub. Your admin gives you the hub address.</p>
+        <div id="setup-home">
+          <div id="setup-wrap">
+            <form id="setup-form" class="form-stack" novalidate>
+              <div class="field">
+                <label for="f-hub">Hub address</label>
+                <input id="f-hub" name="hubUrl" type="url" required autocomplete="url" spellcheck="false" placeholder="https://your-team.getmemsync.com">
+              </div>
+              <p id="setup-error" class="inline-error" aria-live="polite"></p>
+              <div class="actions">
+                <button id="setup-cancel" type="button" class="btn" hidden>Cancel</button>
+                <button type="submit" class="btn btn-primary">Continue</button>
+              </div>
+            </form>
+            <div id="setup-next" class="form-stack setup-next" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <div id="app-views" hidden>
+        <nav class="tabs" aria-label="Main">
+          <a id="nav-catchup" href="#catchup">Catch up</a>
+          <a id="nav-machine" href="#machine">This machine</a>
+        </nav>
+        <div id="view-catchup" hidden></div>
+        <div id="view-machine">
+        <div class="page-head">
+          <div class="page-head-main">
+            <h1 class="page-title">This machine</h1>
+            <div id="sync-status" class="sync-status" hidden>
+              <span id="status-dot" class="status-dot" aria-hidden="true"></span>
+              <span id="status-line" class="status-line" role="status" aria-live="polite"></span>
+              <button id="status-action" type="button" class="btn" hidden></button>
+              <button id="details-btn" type="button" class="link-btn" aria-expanded="false" aria-controls="status-details">details</button>
+              <div id="status-details" class="status-details" hidden></div>
+            </div>
+          </div>
+          <button id="sync-btn" type="button" class="btn btn-primary sync-btn">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M20 12a8 8 0 0 1-13.66 5.66M4 12a8 8 0 0 1 13.66-5.66"></path>
+              <path d="M18 2.5v4.2h-4.2M6 21.5v-4.2h4.2"></path>
+            </svg>
+            <span id="sync-label">Sync now</span>
+          </button>
+        </div>
+
+        <!-- Folders -->
+        <section id="panel-folders" class="tab-panel folders" aria-labelledby="folders-title">
+          <div class="section-head">
+            <h2 id="folders-title" class="section-title">Shared folders</h2>
+            <p class="section-note">Notes from these folders go to their shared space. Teammates' notes come back into the same folder.</p>
+          </div>
+          <div class="panel">
+            <table class="grid folders-grid">
+              <thead>
+                <tr><th scope="col">Folder on this PC</th><th scope="col" id="col-hub" hidden>Hub</th><th scope="col">Shared space</th><th scope="col" class="col-sync">Sync</th><th scope="col" class="col-sync">Git details</th></tr>
+              </thead>
+              <tbody id="folder-rows"></tbody>
+            </table>
+          </div>
+          <p class="footnote">Only notes and session summaries from shared folders leave this machine. Your prompts and raw tool output never do.</p>
+        </section>
+
+        <!-- Hubs -->
+        <section id="panel-hubs" class="tab-panel folders" aria-labelledby="hubs-title">
+          <div class="section-head">
+            <h2 id="hubs-title" class="section-title" tabindex="-1">Hubs</h2>
+            <button id="add-hub" type="button" class="btn">Add hub</button>
+          </div>
+          <div class="panel">
+            <table class="grid hubs-grid">
+              <thead>
+                <tr><th scope="col">Label</th><th scope="col">Address</th><th scope="col">State</th><th scope="col">Signed in as</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+              </thead>
+              <tbody id="hub-rows"></tbody>
+            </table>
+          </div>
+        </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="del-dialog" class="modal" aria-labelledby="del-title"></dialog>
+
+  <dialog id="conn-dialog" class="modal" aria-labelledby="conn-title">
+    <div class="modal-header"><h2 id="conn-title">Hub connection</h2></div>
+    <div id="conn-body" class="modal-body"></div>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "claude-mem-sync",
+  "version": "0.11.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "hub": "bun hub/src/main.ts",
+    "agent": "bun agent/src/main.ts",
+    "bootstrap-admin": "bun hub/src/bootstrap.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "typescript": "^7.0.2"
+  }
+}
