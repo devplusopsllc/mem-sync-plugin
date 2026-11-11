@@ -22,15 +22,15 @@ Needs [Bun](https://bun.sh) (the plugin offers to install it) and Node.js 18 or 
 ## Connect
 
 Ask Claude: "connect mem-sync to https://<team>.getmemsync.com". A browser tab opens:
-paste a laptop key from the portal, or sign in with Cloudflare if your team uses it.
+paste a machine key from the portal, or sign in with Cloudflare if your team uses it.
 Then link a folder to a shared space on the settings page (http://127.0.0.1:37778) or
 ask Claude to do it.
 
-## What leaves your laptop
+## What leaves your machine
 
 Only notes from folders you link, and only to the hub they are linked to. Your prompts,
 raw tool output and file contents stay on your machine. Details:
-https://getmemsync.com/security.html
+https://getmemsync.com/security
 
 This repository is published from DevPlusOps' source; please report issues to
 support via https://getmemsync.com.

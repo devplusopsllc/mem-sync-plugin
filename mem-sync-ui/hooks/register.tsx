@@ -527,7 +527,7 @@ async function connectHub($: $, s: Snapshot, hubUrl: string): Promise<string> {
   const keys = keysUrl(url)
   const known = asUrl(url)?.origin
   const beside = s.hubs?.some((h) => h.id && asUrl(h.hub_url)?.origin !== known) ? ' The hub will be added beside the ones you already have.' : ''
-  return `Opened mem-sync's settings page with ${url} filled in. Paste ${keys ? `a laptop key there (get one at ${keys})` : 'an API key from your hub admin there'} and press Connect.${beside}`
+  return `Opened mem-sync's settings page with ${url} filled in. Paste ${keys ? `a machine key there (get one at ${keys})` : 'an API key from your hub admin there'} and press Connect.${beside}`
 }
 
 type Note = {
@@ -891,7 +891,7 @@ const TOOLS = [
   },
   {
     name: 'connect_hub',
-    description: "mem-sync: connect this laptop's agent to a mem-sync hub by its URL; it is added beside any hubs already connected, and a hub already connected signs in again. A hub with Cloudflare sign-in is connected and its sign-in opens in the browser; a hub that uses API keys (e.g. https://<team>.getmemsync.com) opens mem-sync's settings page in the browser with the address filled in, where the person pastes their key and presses Connect (Claude never handles the key). Asks the person first.",
+    description: "mem-sync: connect this machine's agent to a mem-sync hub by its URL; it is added beside any hubs already connected, and a hub already connected signs in again. A hub with Cloudflare sign-in is connected and its sign-in opens in the browser; a hub that uses API keys (e.g. https://<team>.getmemsync.com) opens mem-sync's settings page in the browser with the address filled in, where the person pastes their key and presses Connect (Claude never handles the key). Asks the person first.",
     inputSchema: { type: 'object', properties: { hub: HUB, hub_url: { type: 'string', description: "The hub's https URL" } }, required: ['hub_url'] },
   },
   {
@@ -1083,7 +1083,7 @@ const ASK: Record<string, (a: Args) => string> = {
     ].join(' ').trim() || `Change sync for ${a.folder}?`,
   never_share_folder: (a) =>
     a.never ? `Never share ${a.folder}? Its link is removed and its notes never sync.` : `Let ${a.folder} be shared again (take it off the never-share list)?`,
-  connect_hub: (a) => `Connect mem-sync on this laptop to the hub ${a.hub_url}? Its sign-in (or, for a key-based hub, mem-sync's settings page) opens in your browser.`,
+  connect_hub: (a) => `Connect mem-sync on this machine to the hub ${a.hub_url}? Its sign-in (or, for a key-based hub, mem-sync's settings page) opens in your browser.`,
   create_project: (a) => `Create the project "${a.name}" on the mem-sync hub?`,
   create_space: (a) => `Create the space "${a.name}" under the project "${a.project}" on the mem-sync hub?`,
   grant_access: (a) => `Give ${a.user} access to ${spacesIn(a)}?`,

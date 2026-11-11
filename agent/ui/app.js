@@ -922,7 +922,7 @@ function renameHub(hb) {
 }
 
 function removeHub(hb) {
-  const copy = `Remove ${hb.label}? This laptop stops syncing with it. Links and notes on the hub stay, and notes already here stay in claude-mem.`;
+  const copy = `Remove ${hb.label}? This machine stops syncing with it. Links and notes on the hub stay, and notes already here stay in claude-mem.`;
   hubDialog("Remove hub", [h("p", {}, copy)], "Remove", true, () => api("DELETE", `/local/hubs/${encodeURIComponent(hb.id)}`));
 }
 
