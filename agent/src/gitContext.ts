@@ -10,7 +10,8 @@ export type GhRunner = (args: string[], timeoutMs: number) => Promise<{ code: nu
 
 const runGh: GhRunner = async (args, timeoutMs) => {
   if (!Bun.which("gh")) return "missing";
-  const p = Bun.spawn(["gh", ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, GH_PROMPT_DISABLED: "1" } });
+  // windowsHide: the agent has no console, so without it Windows flashes a console window for every gh call.
+  const p = Bun.spawn(["gh", ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true, env: { ...process.env, GH_PROMPT_DISABLED: "1" } });
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Race the reads, not just the exit: a child of gh can hold the pipes open after gh is killed.
   const r = await Promise.race([

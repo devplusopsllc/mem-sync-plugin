@@ -83,6 +83,25 @@
   /** Names of the enabled standards as one line; "" when there are none. */
   const standardsLine = (list) => (list || []).map((x) => x.name).join(", ");
 
+  /** A git remote's repo name ("git@github.com:o/repo.git" → "repo"); "" without one. */
+  const repoName = (remote) =>
+    typeof remote === "string" ? (remote.replace(/\.git$/, "").split(/[\/:]/).filter(Boolean).pop() ?? "") : "";
+
+  /**
+   * A file as it reads inside its project, like a path on GitHub: everything after the last folder
+   * named like one of `roots` (folder, space or repo names, any case), with forward slashes. A
+   * relative path stays as it is; an absolute path outside every root shows by file name only.
+   */
+  function shortPath(path, roots) {
+    if (typeof path !== "string" || !path) return "";
+    const p = path.replace(/\\/g, "/");
+    if (!/^([A-Za-z]:\/|\/)/.test(p)) return p.replace(/^\.\//, "");
+    const segs = p.split("/").filter(Boolean);
+    const names = new Set((roots || []).filter(Boolean).map((r) => String(r).toLowerCase()));
+    for (let i = segs.length - 2; i >= 0; i--) if (names.has(segs[i].toLowerCase())) return segs.slice(i + 1).join("/");
+    return `…/${segs[segs.length - 1] ?? p}`;
+  }
+
   /** Option values are strings; space ids are numbers (a string id never matches `===`). */
   const toSpaceId = (v) => Number(v);
 
@@ -305,6 +324,31 @@
       if (!d.open) d.showModal();
     }
 
+    /** Names a file path can start from in this space: its linked folders here and the space's name. */
+    function viewRoots() {
+      const folders = state.projects.filter((p) => p.mapping && p.hub_id === v.hubId && p.mapping.space_id === v.spaceId).map((p) => p.project);
+      const space = (state.spaces[v.hubId] || []).find((s) => s.id === v.spaceId)?.name;
+      return [...folders, space];
+    }
+
+    /** A note's files as short paths separated by " · ", each with its full path on hover. */
+    const fileList = (files, roots) =>
+      files.flatMap((f, i) => [i ? " · " : null, h("span", { title: f }, shortPath(f, roots))]).filter((x) => x !== null);
+
+    /** Up to 6 file chips; two paths that shorten alike show once. */
+    function fileChips(files, roots) {
+      const seen = new Set();
+      const out = [];
+      for (const f of files) {
+        const s = shortPath(f, roots);
+        if (seen.has(s)) continue;
+        seen.add(s);
+        out.push(h("span", { class: "tag", title: f }, s));
+        if (out.length === 6) break;
+      }
+      return out;
+    }
+
     function noteRow(n) {
       const canDelete = n.mine || state.me[v.hubId]?.role === "admin";
       const body = n.narrative || n.subtitle;
@@ -318,7 +362,7 @@
           h("div", { class: "cu-note-title" }, n.title || "Untitled"),
           gitLine(n.git) ? h("div", { class: "cu-git-line" }, gitLine(n.git)) : null,
           body ? h("p", { class: "cu-note-body" }, body) : null,
-          n.files_modified?.length ? h("div", { class: "cu-files" }, n.files_modified.join(" · ")) : null,
+          n.files_modified?.length ? h("div", { class: "cu-files" }, ...fileList(n.files_modified, [...viewRoots(), repoName(n.git?.remote)])) : null,
         ),
         h(
           "div",
@@ -449,7 +493,7 @@
         { class: "cu-person" },
         h("div", { class: "cu-person-head" }, avatar({ id: g.author, name: g.author }), h("div", {}, h("div", { class: "cu-person-name" }, g.mine ? "You" : g.author), h("div", { class: "row-note" }, `${plural(g.count, "note")} · last ${dayTime(g.last)}`))),
         h("ul", {}, ...g.titles.map((t) => h("li", {}, t))),
-        g.files.length ? h("div", { class: "cu-chips" }, ...g.files.slice(0, 6).map((f) => h("span", { class: "tag" }, f))) : null,
+        g.files.length ? h("div", { class: "cu-chips" }, ...fileChips(g.files, [...viewRoots(), ...g.branches.map((b) => repoName(b.remote))])) : null,
         chips.length ? h("div", { class: "cu-chips cu-git" }, ...chips.map(gitTag)) : null,
       );
     }
@@ -468,5 +512,5 @@
     };
   }
 
-  window.MemSyncCatchup = { GIT_PATHS, safeGitUrl, gitLinks, gitChips, gitLine, toSpaceId, standardsLine, groupByAuthor, groupByDay, nextLastVisit, pickerGroups, visitKey, lastVisit, mount };
+  window.MemSyncCatchup = { repoName, shortPath, GIT_PATHS, safeGitUrl, gitLinks, gitChips, gitLine, toSpaceId, standardsLine, groupByAuthor, groupByDay, nextLastVisit, pickerGroups, visitKey, lastVisit, mount };
 })();
