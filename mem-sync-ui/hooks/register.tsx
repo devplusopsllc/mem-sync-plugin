@@ -621,8 +621,8 @@ function describeUsers(s: Snapshot, users: HubUser[]): string {
           ? 'no access yet'
           : u.clients
               .map((m) => {
-                const c = s.clients?.find((x) => x.id === memberProjectId(m)) ?? { id: memberProjectId(m), name: memberProjectName(m) }
-                return `${memberProjectName(m)}: ${m.scope === 'all' ? 'all spaces' : spaceNames(c, m.space_ids)}`
+                const c = s.clients?.find((x) => x.id === memberProjectId(m))
+                return `${memberProjectName(m)}: ${m.scope === 'all' ? 'all spaces' : spaceNames(c ?? {}, m.space_ids)}`
               })
               .join('; ')
     lines.push(`- ${u.name} <${u.email}>, ${u.role}${u.status === 'active' ? '' : ` (${u.status})`} → ${access}`)

@@ -3,6 +3,12 @@
 mem-sync inside Claude Code. Installed with mem-sync (it is a dependency);
 see the [main README](../README.md#in-claude-code) for what it shows.
 
+It installs on its own with mem-sync. To install it by itself:
+
+```
+/plugin install mem-sync-ui --marketplace devplusopsllc/mem-sync-plugin
+```
+
 - `hooks/register.tsx`: the hooks module. It reads and changes sync state only
   through the local agent API (`http://127.0.0.1:37778/local/...`), the same
   calls the agent's web page (`agent/ui/app.js`) makes.
