@@ -1,6 +1,6 @@
 {
   "name": "mem-sync",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Share claude-mem memory for linked project folders with your team through a mem-sync hub",
   "author": { "name": "DevPlusOps", "url": "https://getmemsync.com" },
   "homepage": "https://getmemsync.com",

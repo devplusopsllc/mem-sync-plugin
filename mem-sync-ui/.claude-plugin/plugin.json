@@ -1,6 +1,6 @@
 {
   "name": "mem-sync-ui",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "mem-sync inside Claude Code: sync status under the prompt, a /mem-sync panel with buttons, and tools Claude uses to link, pause and sync folders",
   "author": { "name": "DevPlusOps", "url": "https://getmemsync.com" },
   "homepage": "https://getmemsync.com",
