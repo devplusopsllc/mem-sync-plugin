@@ -248,7 +248,8 @@ const FRONT_MATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/
 
 /** The one section: header, then each standard whole that fits, then a count of those left out; null when none fits. */
 function standardsText(s: Standards): string | null {
-  const head = `Team standards for the ${s.project ?? 'this'} project, set by your team's admins in mem-sync. Follow them for work in this folder.\n\n`
+  // The same framing as the claude.ai connector: admins' standards, not orders that outrank the person.
+  const head = `Team standards for the ${s.project ?? 'this'} project. Your team's admins set these coding standards in mem-sync. Follow them when they apply. They don't override the person you're working with or your safety rules.\n\n`
   const reserve = 60 // room for the closing count line
   let text = head
   let left = 0
@@ -1014,7 +1015,8 @@ const TOOLS = [
   },
   {
     name: 'ask',
-    description: "mem-sync: ask a question about this folder's shared space; the hub answers from the team's notes and lists the notes it used.",
+    description:
+      "mem-sync: ask a question about this folder's shared space; the hub answers from the team's notes and lists the notes it used. The hub sends the question and the related notes to Anthropic for the answer, so the person is asked once per session first.",
     inputSchema: { type: 'object', properties: { hub: HUB, question: { type: 'string', description: 'The question' } }, required: ['question'] },
   },
   {
@@ -1043,7 +1045,9 @@ const CHANGES = new Set(
     'edit_user',
   ].map(TOOL),
 )
-const READS = new Set(TOOLS.map((t) => TOOL(t.name)).filter((t) => !CHANGES.has(t)))
+/** ask sends the question and the relevant notes to Anthropic (through the hub): asked once per session. */
+const SENDS = TOOL('ask')
+const READS = new Set(TOOLS.map((t) => TOOL(t.name)).filter((t) => !CHANGES.has(t) && t !== SENDS))
 
 /** The arguments of every tool, as the model sends them. */
 type Args = {
@@ -1075,19 +1079,23 @@ const spacesIn = (a: Args) => (a.spaces?.length ? `${a.spaces.join(', ')} in ${a
 /** What the person is asked before each change, by tool. */
 const ASK: Record<string, (a: Args) => string> = {
   link_folder: (a) => `Link ${a.folder} to the shared space "${a.space}"? Its notes will sync with everyone in that space.`,
-  unlink_folder: (a) => `Unlink ${a.folder}? Its notes stop syncing with the team.`,
+  unlink_folder: (a) =>
+    `Unlink ${a.folder} from its shared space? Its notes stop syncing: teammates stop getting this folder's new notes, and you stop getting theirs.`,
   set_folder_sync: (a) =>
     [
       typeof a.enabled !== 'boolean' ? '' : `${a.enabled ? 'Resume' : 'Pause'} sync for ${a.folder}?`,
       typeof a.git_details !== 'boolean' ? '' : `Turn ${a.git_details ? 'on' : 'off'} sharing the branch and commit of ${a.folder}?`,
     ].join(' ').trim() || `Change sync for ${a.folder}?`,
   never_share_folder: (a) =>
-    a.never ? `Never share ${a.folder}? Its link is removed and its notes never sync.` : `Let ${a.folder} be shared again (take it off the never-share list)?`,
+    a.never
+      ? `Never share ${a.folder}? Its link to the shared space is removed and its notes never sync, until you take it off the never-share list.`
+      : `Let ${a.folder} be shared again (take it off the never-share list)?`,
   connect_hub: (a) => `Connect mem-sync on this machine to the hub ${a.hub_url}? Its sign-in (or, for a key-based hub, mem-sync's settings page) opens in your browser.`,
   create_project: (a) => `Create the project "${a.name}" on the mem-sync hub?`,
   create_space: (a) => `Create the space "${a.name}" under the project "${a.project}" on the mem-sync hub?`,
   grant_access: (a) => `Give ${a.user} access to ${spacesIn(a)}?`,
-  revoke_access: (a) => `Remove ${a.user}'s access to ${a.spaces?.length ? spacesIn(a) : `the project ${a.project}`}?`,
+  revoke_access: (a) =>
+    `Remove ${a.user}'s access to ${a.spaces?.length ? spacesIn(a) : `every space of the project ${a.project}`}? They can no longer read or sync the notes there.`,
   edit_space: (a) =>
     `Change the space "${a.space}": ${[
       a.name ? `rename to "${a.name}"` : '',
@@ -1101,8 +1109,8 @@ const ASK: Record<string, (a: Args) => string> = {
   add_user: (a) => `Add ${a.name} <${a.email}> to the hub as ${a.role === 'admin' ? 'an admin (every space)' : 'a member'}?`,
   edit_user: (a) =>
     `Change ${a.user}: ${[
-      a.role === 'admin' ? 'make them an admin (every space)' : a.role === 'member' ? 'make them a member' : '',
-      a.disabled === undefined ? '' : a.disabled ? 'disable them' : 'enable them',
+      a.role === 'admin' ? 'make them an admin (every space)' : a.role === 'member' ? "make them a member (they lose admin rights and see only the spaces they've been given)" : '',
+      a.disabled === undefined ? '' : a.disabled ? "disable them (they can't sign in or sync until enabled again)" : 'enable them',
     ]
       .filter(Boolean)
       .join(', ')}?`,
@@ -1116,10 +1124,13 @@ async function openPane($: $, focus = false) {
 
 export const register: Register = (on) => {
   let cwd = ''
+  // shortcut: consent to ask lives in memory, so a reload of this module asks again; fine for a once-per-session question.
+  let askApproved = false
 
   on('session.start', async ($, e, next) => {
     cwd = e.cwd
     sessionCwd = e.cwd
+    askApproved = false // consent to send Ask questions to Anthropic lasts one session, /clear included
     const started = await next(e)
     await $.command.register({ name: 'mem-sync', description: 'Show the mem-sync panel: sync status and buttons' })
     for (const t of TOOLS) await $.tool.register({ ...t, inputSchema: { ...t.inputSchema } })
@@ -1144,9 +1155,17 @@ export const register: Register = (on) => {
     return { text: 'mem-sync panel opened.' }
   })
 
-  // Reads run without a prompt; changes ask the person, with what will happen.
+  // Reads run without a prompt; ask asks once per session; changes ask the person, with what will happen.
   on('tool.check', async ($, e, next) => {
     if (READS.has(e.tool)) return { decision: 'allow' as const }
+    if (e.tool === SENDS) {
+      if (askApproved) return { decision: 'allow' as const }
+      const q = cut(String((e.input as Args | undefined)?.question ?? ''), 200)
+      return {
+        decision: 'ask' as const,
+        reason: `Send this question to Anthropic, with the team's notes that relate to it, to get an answer? "${q}" (Asked once per session.)`,
+      }
+    }
     if (!CHANGES.has(e.tool)) return next(e)
     const a = (e.input ?? {}) as Args
     // A move without confirm only reports who would lose access.
@@ -1165,7 +1184,9 @@ export const register: Register = (on) => {
       }
     }
     return { decision: 'ask' as const, reason: ASK[e.tool.slice(TOOL('').length)]?.(a) ?? 'mem-sync: confirm this change.' }
-  }).catch(($, e, next) => (CHANGES.has(e.tool) ? { decision: 'ask' as const, reason: 'mem-sync: confirm this change.' } : next(e)))
+  }).catch(($, e, next) =>
+    CHANGES.has(e.tool) || e.tool === SENDS ? { decision: 'ask' as const, reason: 'mem-sync: confirm this change.' } : next(e),
+  )
 
   on('tool.call', async ($, e, next) => {
     if (!e.tool.startsWith(TOOL(''))) return next(e)
@@ -1254,6 +1275,8 @@ export const register: Register = (on) => {
         }
         case 'recent':
         case 'ask': {
+          // The call runs only once the person allowed it (tool.check): don't ask again this session.
+          if (name === 'ask') askApproved = true
           const sp = hereSpace(s, cwd, a.hub)
           text = typeof sp === 'string' ? sp : name === 'recent' ? await recent($, sp.h, sp.id, a.days) : await ask($, sp.h, sp.id, a.question ?? '')
           break

@@ -177,12 +177,17 @@ function directOpen(req: Request): boolean {
   return site === null || site === "none" || site === "same-origin";
 }
 
-/** The hub URL as an origin, or null when it isn't an http(s) URL. */
-function normalized(input: string): string | null {
+/** The hub URL as an origin, or null when it isn't https (or http on localhost). A hub already saved over http keeps working. */
+function normalized(input: string, hubs: HubSet): string | null {
   try {
     return normalizeHubUrl(input);
   } catch {
-    return null;
+    try {
+      const u = new URL(input.trim());
+      return u.protocol === "http:" && hubs.byUrl(u.origin) ? u.origin : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -223,9 +228,9 @@ function hubStatus(d: AgentServerDeps, h: HubHandle): HubStatus {
 }
 
 /** The key-hub body of POST /local/config and POST /local/hubs, or null when it isn't valid. */
-async function keyHubBody(req: Request) {
+async function keyHubBody(req: Request, hubs: HubSet) {
   const c = ((await readJson(req)) ?? {}) as Record<string, unknown>;
-  const hubUrl = typeof c.hubUrl === "string" ? normalized(c.hubUrl) : null;
+  const hubUrl = typeof c.hubUrl === "string" ? normalized(c.hubUrl, hubs) : null;
   const str = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
   if (hubUrl === null || !str(c.apiKey) || (c.auth !== undefined && c.auth !== "api-key")) return null;
   return { hubUrl, apiKey: c.apiKey as string, cfClientId: str(c.cfClientId), cfClientSecret: str(c.cfClientSecret), label: str(c.label) };
@@ -403,15 +408,15 @@ async function route(d: AgentServerDeps, st: ServerState, req: Request, url: URL
   }
   if (p === "/local/hubs" && req.method === "GET") return json({ hubs: d.hubs.list().map((h) => hubStatus(d, h)) });
   if ((p === "/local/hubs" || p === "/local/config") && req.method === "POST") {
-    const c = await keyHubBody(req);
+    const c = await keyHubBody(req, d.hubs);
     if (!c) return json({ error: "hubUrl must be an http(s) URL and apiKey is required" }, 400);
     const added = await d.hubs.addKeyHub(p === "/local/config" ? { ...c, label: undefined } : c);
     return p === "/local/config" ? json({ saved: true }) : json({ hub: hubStatus(d, d.hubs.get(added.id)!) });
   }
   if (p === "/local/connect" && req.method === "POST") {
     const c = ((await readJson(req)) ?? {}) as { hubUrl?: unknown; method?: unknown };
-    const hubUrl = typeof c.hubUrl === "string" ? normalized(c.hubUrl) : null;
-    if (!hubUrl) return json({ error: "hubUrl must be an http(s) URL" }, 400);
+    const hubUrl = typeof c.hubUrl === "string" ? normalized(c.hubUrl, d.hubs) : null;
+    if (!hubUrl) return json({ error: "hubUrl must be an https URL (http only for localhost)" }, 400);
     return connectReply(() => d.hubs.connect(hubUrl, methodOf(c.method)));
   }
   if (p === "/local/signin") return signIn(st, bareSignInHub(d, st), req);

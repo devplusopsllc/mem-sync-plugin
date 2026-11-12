@@ -1,8 +1,12 @@
 {
   "name": "mem-sync",
-  "version": "0.12.1",
-  "description": "Share claude-mem memory for mapped projects with your team through the mem-sync hub",
-  "author": { "name": "DevPlusOps" },
+  "version": "0.13.0",
+  "description": "Share claude-mem memory for linked project folders with your team through a mem-sync hub",
+  "author": { "name": "DevPlusOps", "url": "https://getmemsync.com" },
+  "homepage": "https://getmemsync.com",
+  "repository": "https://github.com/devplusopsllc/mem-sync-plugin",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "team", "claude-mem", "sync", "knowledge-sharing"],
   "dependencies": [
     { "name": "claude-mem", "marketplace": "thedotmack" },
     { "name": "mem-sync-ui", "marketplace": "devplusopsllc" }

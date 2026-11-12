@@ -1,14 +1,15 @@
 {
   "name": "devplusopsllc",
-  "owner": { "name": "DevPlusOps" },
-  "metadata": { "description": "DevPlusOps internal Claude Code plugins" },
+  "owner": { "name": "DevPlusOps", "url": "https://getmemsync.com" },
+  "metadata": { "description": "mem-sync: your team's Claude Code memory, shared through a mem-sync hub" },
   "allowCrossMarketplaceDependenciesOn": ["thedotmack"],
   "plugins": [
     {
       "name": "mem-sync",
-      "version": "0.12.1",
+      "version": "0.13.0",
       "source": "./",
-      "description": "Share claude-mem memory for mapped projects with your team through the mem-sync hub",
+      "homepage": "https://getmemsync.com",
+      "description": "Share claude-mem memory for linked project folders with your team through a mem-sync hub",
       "dependencies": [
         { "name": "claude-mem", "marketplace": "thedotmack" },
         { "name": "mem-sync-ui", "marketplace": "devplusopsllc" }
@@ -16,8 +17,9 @@
     },
     {
       "name": "mem-sync-ui",
-      "version": "0.12.1",
+      "version": "0.13.0",
       "source": "./mem-sync-ui",
+      "homepage": "https://getmemsync.com",
       "description": "mem-sync inside Claude Code: sync status under the prompt, a /mem-sync panel with buttons, and tools Claude uses to link, pause and sync folders"
     }
   ]

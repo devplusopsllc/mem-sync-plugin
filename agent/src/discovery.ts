@@ -4,9 +4,11 @@ export type AdvertisedMethod =
   | { type: "cloudflare-access"; team_domain?: string; app_url: string }
   | { type: "api-key"; edge: "cloudflare-service-token" | "none" };
 
+/** The hub's origin. Plain http is only for a hub on this machine: elsewhere it would send keys and notes in the clear. */
 export function normalizeHubUrl(input: string): string {
   const u = new URL(input.trim());
-  if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("hub URL must be http(s)");
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) throw new Error("hub URL must be https (http only for localhost)");
   return u.origin;
 }
 
@@ -56,7 +58,8 @@ export async function discoverDetailed(
   } catch {
     body = null;
   }
-  const hubOrigin = normalizeHubUrl(hubUrl);
+  // An already saved hub keeps working here; only new hub URLs are checked (normalizeHubUrl).
+  const hubOrigin = new URL(hubUrl).origin;
   if (!body || !Array.isArray(body.auth_methods)) return { methods: [{ type: "api-key", edge: "none" }], source: "legacy" };
   const out: AdvertisedMethod[] = [];
   for (const m of body.auth_methods as Record<string, unknown>[]) {

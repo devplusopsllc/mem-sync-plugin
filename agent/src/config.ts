@@ -49,6 +49,17 @@ export function memSyncHome(): string {
   return process.env.MEM_SYNC_HOME ?? join(homedir(), ".mem-sync");
 }
 
+/** Creates the mem-sync home private to this user (0700); an existing one is tightened on POSIX. */
+export function ensureHome(): void {
+  mkdirSync(memSyncHome(), { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") return;
+  try {
+    chmodSync(memSyncHome(), 0o700);
+  } catch {
+    // Not ours to change (another owner): startup must not fail over it.
+  }
+}
+
 const configPath = () => join(memSyncHome(), "config.json");
 
 const LEGACY = ["hubUrl", "auth", "apiKey", "cfClientId", "cfClientSecret"] as const;
@@ -72,12 +83,13 @@ const chmod600 = (p: string) => {
     chmodSync(p, 0o600);
   } catch {
     // Windows ignores POSIX modes; the file is in the user's profile.
+    // shortcut: no icacls on Windows; config.json relies on the profile folder's per-user ACL. Restrict it with icacls (by SID) once that can be tested on Windows.
   }
 };
 
 /** Every write: temp file beside the target, mode 600, then rename; legacy top-level hub fields are dropped. */
 function writeConfigAtomic(obj: Record<string, unknown>): void {
-  mkdirSync(memSyncHome(), { recursive: true });
+  ensureHome();
   const out = { ...obj };
   for (const k of LEGACY) delete out[k];
   const tmp = `${configPath()}.${process.pid}.${crypto.randomUUID().slice(0, 8)}.tmp`;

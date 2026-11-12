@@ -1,6 +1,6 @@
-// Shared by kick.mjs and bun-bootstrap.mjs. Plain Node: these run before Bun may exist.
+// Used by kick.mjs. Plain Node: it runs before Bun may exist.
 import { execFile, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,29 +12,20 @@ export const home = process.env.MEM_SYNC_HOME ?? join(homedir(), ".mem-sync");
 export const entry = process.env.MEM_SYNC_AGENT_ENTRY ?? join(root, "agent", "src", "main.ts");
 export const base = `http://127.0.0.1:${port}`;
 
-export const bunMarkerPath = join(home, "bun-install.json");
-export const bunLogPath = join(home, "bun-install.log");
-/** Held (created with "wx") by the session that runs an install, until bun-bootstrap.mjs finishes. */
-export const bunLockPath = join(home, "bun-install.lock");
-
-/** A running install (or its lock) older than this was interrupted (reboot, killed). */
-export const STALE_INSTALL_MS = 30 * 60_000;
-/** An unreadable marker older than this is left over from a crash, not being written. */
-const CORRUPT_MARKER_MS = 60_000;
-
-/** Bun's official installer, run by bun-bootstrap.mjs: [command, args]. */
-export function bunInstallCommand(isWindows = IS_WINDOWS) {
-  return isWindows
-    ? ["powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-c", "irm https://bun.sh/install.ps1 | iex"]]
-    : ["bash", ["-c", "curl -fsSL https://bun.sh/install | bash"]];
-}
-
-/** The command shown to the user when the automatic install failed. */
+/** Bun's official installer, shown to the person (never run by a hook) when Bun is missing. */
 export function manualBunInstall(isWindows = IS_WINDOWS) {
   return isWindows ? 'powershell -c "irm https://bun.sh/install.ps1 | iex"' : "curl -fsSL https://bun.sh/install | bash";
 }
 
-export const MANUAL_BUN_INSTALL = manualBunInstall();
+/** Creates the mem-sync home private to this user (0700); an existing one is tightened on POSIX. */
+export function ensureHome() {
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  if (!IS_WINDOWS) {
+    try {
+      chmodSync(home, 0o700);
+    } catch {}
+  }
+}
 
 /**
  * Picks Bun from `where bun` (Windows) or `which bun` output lines. On Windows prefers bun.exe,
@@ -100,7 +91,7 @@ export async function requestSync(timeoutMs = 400) {
 
 /** Starts the agent detached with its output in agent.log; `extraEnv` is added to its environment. */
 export function startAgent(bun, extraEnv = {}) {
-  mkdirSync(home, { recursive: true });
+  ensureHome();
   const log = openSync(join(home, "agent.log"), "a");
   const shell = IS_WINDOWS && /\.(cmd|bat)$/i.test(bun); // npm shims need cmd.exe
   const child = spawn(shell ? `"${bun}"` : bun, [shell ? `"${entry}"` : entry], {
@@ -114,40 +105,7 @@ export function startAgent(bun, extraEnv = {}) {
   child.unref();
 }
 
-const ageOf = (path) => Date.now() - statSync(path).mtimeMs;
-
-/**
- * The bun-install.json marker { startedAt, status: "running" | "done" | "failed", error? }, or null.
- * An unreadable marker counts as a running install while fresh, and is deleted once it is old.
- */
-export function readBunMarkerState() {
-  let raw;
-  try {
-    raw = readFileSync(bunMarkerPath, "utf8");
-  } catch {
-    return null;
-  }
-  try {
-    const m = JSON.parse(raw);
-    if (m && typeof m === "object" && typeof m.startedAt === "number" && typeof m.status === "string") return m;
-  } catch {}
-  try {
-    const age = ageOf(bunMarkerPath);
-    if (age > CORRUPT_MARKER_MS) {
-      rmSync(bunMarkerPath, { force: true });
-      return null;
-    }
-    return { startedAt: Date.now() - age, status: "running" };
-  } catch {
-    return null;
-  }
-}
-
-/** Writes the marker atomically (temp file, then rename) so readers never see half a file. */
-export function writeBunMarker(marker) {
-  writeJsonAtomic(bunMarkerPath, marker);
-}
-
+/** Writes JSON atomically (temp file, then rename) so readers never see half a file. */
 function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(value));
@@ -156,7 +114,7 @@ function writeJsonAtomic(path, value) {
       renameSync(tmp, path);
       return;
     } catch (e) {
-      // Windows refuses the rename while another process has the marker open; retry briefly.
+      // Windows refuses the rename while another process has the file open; retry briefly.
       if (i >= 20) {
         rmSync(tmp, { force: true });
         throw e;
@@ -165,42 +123,6 @@ function writeJsonAtomic(path, value) {
     }
   }
 }
-
-/**
- * Takes the install lock. Only one session can create it ("wx"). A lock older than
- * STALE_INSTALL_MS belongs to an interrupted install and is taken over: it is moved aside first,
- * and if what was moved turns out to be fresh (another session took it over a moment earlier),
- * it is put back and this session backs off.
- */
-export function acquireInstallLock() {
-  const create = () => {
-    try {
-      closeSync(openSync(bunLockPath, "wx"));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (create()) return true;
-  try {
-    if (ageOf(bunLockPath) <= STALE_INSTALL_MS) return false;
-    const aside = `${bunLockPath}.${process.pid}.stale`;
-    renameSync(bunLockPath, aside);
-    if (ageOf(aside) <= STALE_INSTALL_MS) {
-      renameSync(aside, bunLockPath);
-      return false;
-    }
-    rmSync(aside, { force: true });
-  } catch {
-    return false;
-  }
-  return create();
-}
-
-export function releaseInstallLock() {
-  rmSync(bunLockPath, { force: true });
-}
-
 
 // ---- Replacing an outdated agent after /plugin update.
 
@@ -230,12 +152,6 @@ export function agentVerdict(health, installed) {
   // A legacy agent must at least say it is one: a foreign or non-JSON 200 is left alone.
   if (health.version === undefined || health.version === null) return health.service === "mem-sync-agent" ? "replace" : "keep";
   return compareVersions(health.version, installed) === -1 ? "replace" : "keep";
-}
-
-/** The image name in the first line of `tasklist /FO CSV /NH` output, or null. */
-export function tasklistImageName(output) {
-  const m = /^"([^"]*)"/.exec(String(output ?? "").trim());
-  return m ? m[1] : null;
 }
 
 /** True for "bun" or "bun.exe", with or without a directory. */
@@ -270,19 +186,39 @@ export async function probeHealth(timeoutMs = 400) {
 /** Appends a timestamped line to agent.log. Never throws. */
 export function logAgent(message) {
   try {
-    mkdirSync(home, { recursive: true });
+    ensureHome();
     appendFileSync(join(home, "agent.log"), `${new Date().toISOString()} [hook] ${message}\n`);
   } catch {}
 }
 
-/** True only when `pid` is a running process whose image/command name is bun or bun.exe. */
-export function isBunProcess(pid, timeoutMs = 800) {
+/**
+ * True for a command line that is bun running an agent/src/main.ts: how startAgent (in every
+ * plugin version) launches the agent. The program may be quoted (Windows); the entry may use / or \.
+ */
+export function isAgentCommandLine(cmd) {
+  const s = typeof cmd === "string" ? cmd.trim() : "";
+  const isMain = (rest) => /(^|[\s"'\\/])agent[\\/]src[\\/]main\.ts["']?(\s|$)/.test(rest);
+  const q = /^"([^"]+)"\s+(.+)$/.exec(s);
+  if (q) return isBunImageName(q[1]) && isMain(q[2]);
+  // ps never quotes, so "/Users/Jane Doe/.bun/bin/bun …" splits at a space inside the path: a later
+  // split only counts when the part before it is a real file, so "python /x/bun …" never matches.
+  return [...s.matchAll(/\s+/g)].some((m, i) => {
+    const image = s.slice(0, m.index);
+    return isBunImageName(image) && (i === 0 || existsSync(image)) && isMain(s.slice(m.index + m[0].length));
+  });
+}
+
+/** True only when `pid` is running and its command line is our agent's (see isAgentCommandLine). */
+export function isAgentProcess(pid, timeoutMs = 800) {
   try {
     const r = IS_WINDOWS
-      ? spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { encoding: "utf8", timeout: timeoutMs, windowsHide: true })
-      : spawnSync("ps", ["-p", String(pid), "-o", "comm="], { encoding: "utf8", timeout: timeoutMs });
-    if (r.status !== 0 || !r.stdout) return false;
-    return isBunImageName(IS_WINDOWS ? tasklistImageName(r.stdout) : r.stdout.trim());
+      ? spawnSync(
+          "powershell",
+          ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId=${Number(pid)}').CommandLine`],
+          { encoding: "utf8", timeout: timeoutMs, windowsHide: true },
+        )
+      : spawnSync("ps", ["-ww", "-p", String(pid), "-o", "args="], { encoding: "utf8", timeout: timeoutMs });
+    return r.status === 0 && isAgentCommandLine(String(r.stdout ?? "").trim());
   } catch {
     return false;
   }
@@ -392,6 +328,9 @@ const stepTimeout = (deadline, max) => Math.max(50, Math.min(max, deadline - Dat
 
 const versionOf = (health) => health.version ?? "(no version)";
 
+const LEGACY_LEFT_NOTICE =
+  `mem-sync: an older mem-sync agent seems to be running on port ${port}, but it couldn't be confirmed as mem-sync's own process, so it was left running. Stop it yourself, then start a new session.`;
+
 /** Logs why a running agent whose version can't be compared with the installed one is kept. */
 export function noteKeptAgent(health, installed) {
   if (!health || !parseVersion(installed)) return;
@@ -406,9 +345,10 @@ export function noteKeptAgent(health, installed) {
  * Asks an outdated agent to stop. Health is probed again first, and nothing is sent unless the
  * same agent (version and pid) still answers. A 0.2.3+ agent gets POST /local/shutdown; only an
  * HTTP 4xx counts as a refusal, a timeout or reset may just mean it is already stopping. A legacy
- * agent has no such route: the hook kills the process LISTENING on the agent port, only when it
- * is bun (health already said "mem-sync-agent"). agent.pid is only a detail for the log.
- * Returns { pid, detail } when it asked or killed, or null when it left the agent running (logged).
+ * agent has no such route: the hook kills the process LISTENING on the agent port, only when its
+ * command line is bun running an agent/src/main.ts (health already said "mem-sync-agent"). agent.pid
+ * is only a detail for the log. Returns { pid, detail } when it asked or killed, { notice } when it
+ * left a legacy agent running (logged; the person is told), or null when it left the agent running (logged).
  */
 async function stopOutdatedAgent(health, installed, deadline) {
   const running = versionOf(health);
@@ -436,12 +376,13 @@ async function stopOutdatedAgent(health, installed, deadline) {
   }
   const leave = (why) => {
     logAgent(`agent ${running} is outdated (installed ${installed}) but ${why}; left it running`);
-    return null;
+    return { notice: LEGACY_LEFT_NOTICE };
   };
   const pid = listenerPid(port, stepTimeout(deadline, 800));
   if (!pid) return leave(`the process listening on port ${port} could not be identified`);
   if (pid === process.pid) return leave(`port ${port} is held by this hook`);
-  if (!isBunProcess(pid, stepTimeout(deadline, 800))) return leave(`pid ${pid} listening on port ${port} is not a bun process`);
+  // PowerShell can take a second to start on Windows: an answer too late leaves the agent alone.
+  if (!isAgentProcess(pid, stepTimeout(deadline, 1500))) return leave(`pid ${pid} listening on port ${port} is not a mem-sync agent (bun running agent/src/main.ts)`);
   let filePid = null;
   try {
     filePid = toPid(readFileSync(join(home, "agent.pid"), "utf8").trim());
@@ -469,7 +410,8 @@ async function waitGone(pid, deadline) {
  * MIN_REPLACE_MS remain, and once it was asked to stop the new agent is always started: it keeps
  * retrying the port (MEM_SYNC_PORT_WAIT_MS), so an old agent still finishing a sync when the
  * deadline comes never leaves the machine without an agent. Then waits up to waitMs (also capped
- * by the deadline) for an agent to answer. Never throws.
+ * by the deadline) for an agent to answer. Returns a notice for the person when an outdated
+ * agent had to be left running because it couldn't be confirmed as ours; otherwise nothing. Never throws.
  */
 export async function ensureAgent(bun, { deadline = Date.now() + 3000, waitMs = 1500, health } = {}) {
   if (health === undefined) health = await probeHealth(stepTimeout(deadline, 400));
@@ -488,6 +430,7 @@ export async function ensureAgent(bun, { deadline = Date.now() + 3000, waitMs = 
   }
   const stopped = await stopOutdatedAgent(health, installed, deadline);
   if (!stopped) return;
+  if (stopped.notice) return stopped.notice;
   const gone = await waitGone(stopped.pid, deadline);
   startAgent(bun, { MEM_SYNC_PORT_WAIT_MS: String(REPLACE_PORT_WAIT_MS) });
   const old = `agent ${versionOf(health)} (pid ${stopped.pid ?? "?"})`;
@@ -505,10 +448,6 @@ export const noticePath = join(home, "notice.json");
 const QUIET_BLIP_MS = 15 * 60_000;
 /** The same problem is repeated on prompts at most this often (SessionStart always shows it). */
 const RENOTICE_MS = 30 * 60_000;
-/** The sign-in page is auto-opened again after this long, even without a successful sync since. */
-const REOPEN_SIGNIN_MS = 12 * 3600_000;
-/** After an auto-open that got no answer (connection error, timeout), one retry this much later. */
-export const SIGNIN_RETRY_MS = 2 * 60_000;
 const NOTICE_PROBLEMS = ["signin", "revoked", "not_allowed", "need_key", "unreachable", "error", "paused"];
 const QUIET_PROBLEMS = ["unreachable", "error", "paused"];
 
@@ -547,13 +486,11 @@ function errorDetail(health) {
   return err.length <= 120 && !err.includes("://") ? err : "";
 }
 
-/** The one-line message for a problem (or "recovered"). `opened`: the sign-in page was just opened. */
-export function noticeMessage(problem, health, { base: url = base, opened = false } = {}) {
+/** The one-line message for a problem (or "recovered"). Hooks never open the browser: the person, or Claude's open tool, does. */
+export function noticeMessage(problem, health, { base: url = base } = {}) {
   switch (problem) {
     case "signin":
-      return opened
-        ? `mem-sync needs re-authentication — opening the Cloudflare sign-in in your browser. If it didn't open: ${url}/signin`
-        : `mem-sync needs re-authentication — sign in at ${url}/signin`;
+      return `mem-sync needs re-authentication — sign in at ${url}/signin (or ask Claude to open the mem-sync sign-in)`;
     case "revoked":
       return `mem-sync: your API key was revoked — reconnect at ${url}`;
     case "need_key":
@@ -578,48 +515,27 @@ export function noticeMessage(problem, health, { base: url = base, opened = fals
 }
 
 /**
- * When to auto-open the sign-in for a "signin" problem: "first" when it was never opened, a sync
- * succeeded after it was (a new lapse), or REOPEN_SIGNIN_MS passed; "retry" when the last attempt
- * got no answer and its retry is due; else false. signinOpenedAt is carried across problem changes,
- * so signin → unreachable/down → signin is still the same lapse.
- */
-function signinAutoOpen(state, now, lastSuccessAt) {
-  const opened = state.signinOpenedAt;
-  if (elapsed(now, opened, REOPEN_SIGNIN_MS) || (isTime(lastSuccessAt) && lastSuccessAt > opened)) return "first";
-  const retryAt = state.signinRetryAt;
-  if (isTime(retryAt) && (now >= retryAt || retryAt - now > SIGNIN_RETRY_MS)) return "retry";
-  return false;
-}
-
-/**
  * What to tell the user, given the stored notice state and the current problem. Returns
- * { show: "problem" | "recovered" | null, autoOpen: "first" | "retry" | false, state } where
- * `state` is what notice.json should hold next (null: delete it), to be written before the sign-in
- * is requested. `ok` says health is fully ok, so a stored problem is over; no problem without `ok`
- * (a blip, paused, unconfigured) keeps the episode as it is. `lastSuccessAt` is the agent's
- * last_success_at. SessionEnd ("end") never shows anything or opens the browser.
+ * { show: "problem" | "recovered" | null, state } where `state` is what notice.json should hold
+ * next (null: delete it). `ok` says health is fully ok, so a stored problem is over; no problem
+ * without `ok` (a blip, paused, unconfigured) keeps the episode as it is. SessionEnd ("end") never
+ * shows anything.
  */
-export function planNotice(stored, problem, { hook, now = Date.now(), ok = false, lastSuccessAt = null }) {
-  if (hook === "end") return { show: null, autoOpen: false, state: stored };
+export function planNotice(stored, problem, { hook, now = Date.now(), ok = false }) {
+  if (hook === "end") return { show: null, state: stored };
   if (!problem) {
-    if (!ok) return { show: null, autoOpen: false, state: stored };
-    return { show: stored?.problem ? "recovered" : null, autoOpen: false, state: null };
+    if (!ok) return { show: null, state: stored };
+    return { show: stored?.problem ? "recovered" : null, state: null };
   }
   const same = stored?.problem === problem;
-  const state = same
-    ? { ...stored }
-    : { problem, since: now, lastShownAt: null, signinOpenedAt: stored?.signinOpenedAt ?? null, signinRetryAt: stored?.signinRetryAt ?? null };
-  const autoOpen = problem === "signin" ? signinAutoOpen(state, now, lastSuccessAt) : false;
-  if (autoOpen === "first") Object.assign(state, { signinOpenedAt: now, signinRetryAt: null });
-  if (autoOpen === "retry") state.signinRetryAt = null;
-  // Opening the browser is always explained.
-  const show = autoOpen || !same || hook === "start" || elapsed(now, state.lastShownAt, RENOTICE_MS);
+  const state = same ? { ...stored } : { problem, since: now, lastShownAt: null };
+  const show = !same || hook === "start" || elapsed(now, state.lastShownAt, RENOTICE_MS);
   if (show) state.lastShownAt = now;
-  return { show: show ? "problem" : null, autoOpen, state };
+  return { show: show ? "problem" : null, state };
 }
 
 /**
- * notice.json { problem, since, lastShownAt, signinOpenedAt, signinRetryAt }, or null when missing
+ * notice.json { problem, since, lastShownAt }, or null when missing
  * or corrupt (then it is deleted). A time field that isn't a finite number reads as null.
  */
 export function readNoticeState(path = noticePath) {
@@ -635,29 +551,16 @@ export function readNoticeState(path = noticePath) {
     return null;
   }
   const time = (v) => (isTime(v) ? v : null);
-  return { problem: s.problem, since: time(s.since), lastShownAt: time(s.lastShownAt), signinOpenedAt: time(s.signinOpenedAt), signinRetryAt: time(s.signinRetryAt) };
+  return { problem: s.problem, since: time(s.since), lastShownAt: time(s.lastShownAt) };
 }
 
 /** Writes notice.json atomically, or deletes it for null. Never throws. */
 export function writeNoticeState(state, path = noticePath) {
   try {
     if (!state) return rmSync(path, { force: true });
-    mkdirSync(dirname(path), { recursive: true });
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeJsonAtomic(path, state);
   } catch {}
-}
-
-/**
- * Asks the agent to open the Cloudflare sign-in in the browser: "opened" (202), "final" (409: the
- * hub uses keys, or no sign-in is needed; not retried) or "failed" (no answer, or another status).
- */
-export async function requestSignin(timeoutMs = 500) {
-  try {
-    const r = await fetch(`${base}/local/signin`, { method: "POST", headers: { "x-mem-sync": "1" }, signal: AbortSignal.timeout(timeoutMs) });
-    return r.status === 202 ? "opened" : r.status === 409 ? "final" : "failed";
-  } catch {
-    return "failed";
-  }
 }
 
 /** The hook's JSON input on stdin, or null: no stdin, a closed or empty one, bad JSON, or nothing within `timeoutMs`. */

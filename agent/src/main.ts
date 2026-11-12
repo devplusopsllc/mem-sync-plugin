@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { join } from "path";
 import { ClaudeMemApi } from "../../shared/src/claudeMemApi";
 import { ClaudeMemReader } from "./claudeMemDb";
-import { DEFAULTS, loadConfig, memSyncHome, usableHub } from "./config";
+import { DEFAULTS, ensureHome, loadConfig, memSyncHome, usableHub } from "./config";
 import { GitContextStore } from "./gitContext";
 import { HubSet, type HubHandle } from "./hubs";
 import { Ledger } from "./ledger";
@@ -12,7 +12,7 @@ import { createAgentServer } from "./server";
 import type { SyncDeps } from "./sync";
 
 const home = memSyncHome();
-mkdirSync(home, { recursive: true });
+ensureHome();
 const startCfg = loadConfig();
 const port = Number(process.env.MEM_SYNC_PORT ?? startCfg.port ?? DEFAULTS.port);
 const ledger = new Ledger(join(home, "ledger.db"), startCfg.hubs[0]?.id);

@@ -17,14 +17,20 @@ the hub admin page do, so nobody has to open either:
   `unlink_folder`, `set_folder_sync` (pause/resume), `never_share_folder`,
   `connect_hub` (Cloudflare sign-in only), `recent` (what teammates did lately
   in this folder's space, by person) and `ask` (a question answered from the
-  space's notes, with sources; needs `ANTHROPIC_API_KEY` on the hub). The last
-  two are read only and say so in plain text when the folder isn't linked.
+  space's notes, with sources; needs `ANTHROPIC_API_KEY` on the hub, which
+  sends the question and the related notes to Anthropic). The last two are
+  read only and say so in plain text when the folder isn't linked.
 - Hub admins: `users`, `grant_access`, `revoke_access`, `create_project`,
   `rename_project`, `create_space`, `edit_space` (rename, archive, main),
   `move_space` (previews who loses access; moves only with `confirm`),
   `add_user`, `edit_user` (role, disable).
 
-Every tool that changes something asks the person first. Admin tools refuse a
+Every tool that changes something asks the person first; the questions for
+`unlink_folder`, `never_share_folder`, `revoke_access` and `edit_user` say
+what is lost. `ask` asks once per session before the first question goes to
+Anthropic. `status`, `spaces`, `sync_now`, `open`, `users` and `recent` run
+without asking. Tools have no MCP `title` or annotations: `$.tool.register`
+takes only a name, description, input schema and `isDeferred`. Admin tools refuse a
 member before calling the hub, and the hub refuses them anyway. Claude never
 sees or handles API keys: `users` drops key fields, and there are no key tools.
 
